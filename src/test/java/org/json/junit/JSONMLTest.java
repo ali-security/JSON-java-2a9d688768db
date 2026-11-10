@@ -1209,4 +1209,38 @@ public class JSONMLTest {
         }
         return sb.toString();
     }
+
+    /**
+     * Exploit regression for CVE-2026-59171: JSONML converts attribute values
+     * and element content with XML.stringToValue, so a numeric value of a
+     * million digits used to block the thread in BigInteger/BigDecimal parsing.
+     * It must now be kept as a string, quickly.
+     */
+    @Test(timeout = 5000)
+    public void hugeNumericContentAndAttributeAreKeptAsString() {
+        StringBuilder sb = new StringBuilder(1000000);
+        for (int i = 0; i < 1000000; i++) {
+            sb.append('9');
+        }
+        String huge = sb.toString();
+        String xml = "<a b=\"" + huge + "\">" + huge + "</a>";
+
+        JSONArray jsonArray = JSONML.toJSONArray(xml);
+        assertKeptAsString(huge, jsonArray.getJSONObject(1).get("b"));
+        assertKeptAsString(huge, jsonArray.get(2));
+
+        JSONObject jsonObject = JSONML.toJSONObject(xml);
+        assertKeptAsString(huge, jsonObject.get("b"));
+        assertKeptAsString(huge, jsonObject.getJSONArray("childNodes").get(0));
+    }
+
+    /**
+     * Asserts that a huge literal was kept as the original string. The values
+     * are not printed on failure because they are a million characters long.
+     */
+    private static void assertKeptAsString(String expected, Object actual) {
+        assertTrue("expected the literal to be kept as a String but got "
+                + (actual == null ? "null" : actual.getClass().getName()),
+                expected.equals(actual));
+    }
 }

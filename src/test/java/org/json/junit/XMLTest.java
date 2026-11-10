@@ -38,6 +38,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.StringReader;
+import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -1240,6 +1241,71 @@ public class XMLTest {
         // the innermost element is empty, so it is converted to ""
         assertEquals(99, depth);
         assertEquals("", current.get("a"));
+    }
+
+    /**
+     * Exploit regression for CVE-2026-59171: a numeric element content or
+     * attribute value of a million digits used to be handed to
+     * BigInteger/BigDecimal, whose super-linear parsing blocks the thread for
+     * seconds. It must now be kept as a string, quickly.
+     */
+    @Test(timeout = 5000)
+    public void hugeNumericContentAndAttributeAreKeptAsString() {
+        String huge = repeatedDigits('9', 1000000);
+        String hugeDecimal = "-" + huge + ".5e3";
+
+        JSONObject content = XML.toJSONObject("<a>" + huge + "</a>");
+        assertKeptAsString(huge, content.get("a"));
+
+        content = XML.toJSONObject(new StringReader("<a>" + hugeDecimal + "</a>"));
+        assertKeptAsString(hugeDecimal, content.get("a"));
+
+        JSONObject attribute = XML.toJSONObject("<a b=\"" + huge + "\"/>", XMLParserConfiguration.ORIGINAL);
+        assertKeptAsString(huge, attribute.getJSONObject("a").get("b"));
+
+        assertKeptAsString(huge, XML.stringToValue(huge));
+        assertKeptAsString(hugeDecimal, XML.stringToValue(hugeDecimal, (XMLXsiTypeConverter<?>) null));
+    }
+
+    /**
+     * Numbers up to 1000 characters long are still converted by XML.stringToValue,
+     * while one character more is kept as a string (CVE-2026-59171).
+     */
+    @Test
+    public void xmlStringToValueMaxNumberLength() {
+        String atLimit = repeatedDigits('8', 1000);
+        Object value = XML.stringToValue(atLimit);
+        assertTrue("Expected Number but got " + value.getClass(), value instanceof Number);
+        assertEquals(new BigInteger(atLimit), value);
+
+        JSONObject attribute = XML.toJSONObject("<a b=\"" + atLimit + "\"/>");
+        assertTrue(attribute.getJSONObject("a").get("b") instanceof Number);
+
+        String overLimit = atLimit + "8";
+        assertEquals(overLimit, XML.stringToValue(overLimit));
+        attribute = XML.toJSONObject("<a b=\"" + overLimit + "\"/>");
+        assertEquals(overLimit, attribute.getJSONObject("a").get("b"));
+    }
+
+    /**
+     * Asserts that a huge literal was kept as the original string. The values
+     * are not printed on failure because they are a million characters long.
+     */
+    private static void assertKeptAsString(String expected, Object actual) {
+        assertTrue("expected the literal to be kept as a String but got "
+                + (actual == null ? "null" : actual.getClass().getName()),
+                expected.equals(actual));
+    }
+
+    /**
+     * Builds a string of <code>count</code> copies of <code>digit</code>.
+     */
+    private static String repeatedDigits(char digit, int count) {
+        StringBuilder sb = new StringBuilder(count);
+        for (int i = 0; i < count; i++) {
+            sb.append(digit);
+        }
+        return sb.toString();
     }
 
     /**
