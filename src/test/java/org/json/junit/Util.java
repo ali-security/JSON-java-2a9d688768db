@@ -117,4 +117,51 @@ public class Util {
             );
         }
     }
+
+    /**
+     * Runs the given task on a new thread with a large (8 MB) stack and
+     * returns whatever it threw. The test JVM may be run with a small stack
+     * (for example -Xss512k); running deeply nested parsing on a thread with
+     * a known, generous stack means only the parser's own nesting depth
+     * limit, and not stack exhaustion, decides the outcome.
+     * @param task the code to run
+     * @return the Throwable thrown by the task, or null if it completed normally
+     */
+    public static Throwable throwableFromLargeStack(final Runnable task) {
+        final Throwable[] thrown = new Throwable[1];
+        Thread thread = new Thread(null, new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    task.run();
+                } catch (Throwable t) {
+                    thrown[0] = t;
+                }
+            }
+        }, "large-stack-test", 8L * 1024L * 1024L);
+        thread.start();
+        try {
+            thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for the large stack test thread", e);
+        }
+        return thrown[0];
+    }
+
+    /**
+     * Asserts that the given Throwable is the JSONException raised when the
+     * maximum nesting depth of an XML parser configuration is reached.
+     * @param thrown the Throwable to check, typically obtained from
+     *  {@link #throwableFromLargeStack(Runnable)}
+     * @param maxNestingDepth the maximum nesting depth that should have been reached
+     */
+    public static void assertMaxNestingDepthReached(Throwable thrown, int maxNestingDepth) {
+        if (thrown == null) {
+            fail("Expecting a JSONException");
+        }
+        assertTrue("Wrong throwable thrown: " + thrown, thrown instanceof JSONException);
+        assertTrue("Wrong throwable thrown: not expecting message <" + thrown.getMessage() + ">",
+                thrown.getMessage().startsWith("Maximum nesting depth of " + maxNestingDepth));
+    }
 }
